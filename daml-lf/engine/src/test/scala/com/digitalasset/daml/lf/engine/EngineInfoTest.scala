@@ -17,7 +17,7 @@ class EngineInfoTest extends WordSpec with Matchers {
 
       infos.foreach(
         _.pretty.toSeq(0) shouldBe
-          "DAML LF Engine supports LF versions: 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.dev; input transaction versions: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, dev; input value versions: 1, 2, 3, 4, 5, 6, dev; output transaction versions: 10, dev; output value versions: 6, dev."
+          "DAML LF Engine supports LF versions: 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.dev; input transaction versions: 10, dev; input value versions: 1, 2, 3, 4, 5, 6, dev; output transaction versions: 10, dev; output value versions: 6, dev."
       )
     }
 

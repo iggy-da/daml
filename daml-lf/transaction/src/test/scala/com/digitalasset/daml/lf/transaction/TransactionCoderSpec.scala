@@ -4,16 +4,14 @@
 package com.daml.lf
 package transaction
 
-import com.daml.lf.EitherAssertions
 import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.{Identifier, PackageId, Party, QualifiedName}
+import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.Node.{GenNode, NodeCreate, NodeExercises, NodeFetch}
 import com.daml.lf.transaction.{Transaction => Tx, TransactionOuterClass => proto}
-import com.daml.lf.value.Value.{ContractInst, ValueParty, VersionedValue}
+import com.daml.lf.value.Value.{ContractInst, ValueParty}
 import com.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
 import com.daml.lf.value.{Value, ValueCoder, ValueVersion, ValueVersions}
-import com.daml.lf.transaction.TransactionVersions._
-import com.daml.lf.transaction.VersionTimeline.Implicits._
 import org.scalatest.prop.PropertyChecks
 import org.scalatest.{Inside, Matchers, WordSpec}
 
@@ -250,40 +248,16 @@ class TransactionCoderSpec
         }
       }
 
-    "fetch decoding should fail when unsupported value version received" in forAll(
-      fetchNodeGen,
-      minSuccessful(5)) { node =>
-      inside(
-        TransactionCoder.encodeNode(
-          TransactionCoder.NidEncoder,
-          ValueCoder.CidEncoder,
-          defaultTransactionVersion,
-          NodeId(0),
-          node)) {
-        case Right(cn) if cn.hasFetch =>
-          val badVersion = "I do not exist"
-          TransactionCoder.decodeNode(
-            TransactionCoder.NidDecoder,
-            ValueCoder.CidDecoder,
-            defaultTransactionVersion,
-            cn.toBuilder.setFetch(cn.getFetch.toBuilder.setValueVersion(badVersion)).build
-          ) should ===(Left(DecodeError(s"Unsupported template ID version $badVersion")))
-      }
-    }
-
     "do tx with a lot of root nodes" in {
       val node =
-        Node.NodeCreate[Value.ContractId, Value.VersionedValue[Value.ContractId]](
+        Node.NodeCreate[Value.ContractId, Value[Value.ContractId]](
           coid = absCid("#test-cid"),
           coinst = ContractInst(
             Identifier(
               PackageId.assertFromString("pkg-id"),
               QualifiedName.assertFromString("Test:Name"),
             ),
-            VersionedValue(
-              ValueVersions.acceptedVersions.last,
-              ValueParty(Party.assertFromString("francesco")),
-            ),
+            ValueParty(Party.assertFromString("francesco")),
             "agreement",
           ),
           optLocation = None,
@@ -294,8 +268,15 @@ class TransactionCoderSpec
       val nodes = ImmArray((1 to 10000).map { nid =>
         NodeId(nid) -> node
       })
-      val tx = TransactionVersions.assertAsVersionedTransaction(
-        GenTransaction(nodes = HashMap(nodes.toSeq: _*), roots = nodes.map(_._1)))
+      val tx = TransactionVersions
+        .asVersionedTransaction(
+          TransactionVersions.DevOutputVersions,
+          (_: PackageId) => LanguageVersion.default,
+          nodes.map(_._1),
+          HashMap(nodes.toSeq: _*)
+        )
+        .right
+        .get
 
       tx shouldEqual TransactionCoder
         .decodeTransaction(
@@ -430,10 +411,14 @@ class TransactionCoderSpec
   ): GenTransaction[Nid, Cid, Val] =
     t copy (nodes = t.nodes.transform((_, gn) => f(gn)))
 
+  // FIXME: https://github.com/digital-asset/daml/issues/7709
+  // The following function should be usefull to test choice observers
   def minimalistTx[Nid, Cid, Val](
       txvMin: TransactionVersion,
       tx: GenTransaction[Nid, Cid, Val],
   ): GenTransaction[Nid, Cid, Val] = {
+    import VersionTimeline.Implicits._
+
     def condApply(
         before: TransactionVersion,
         f: GenNode[Nid, Cid, Val] => GenNode[Nid, Cid, Val],
@@ -442,10 +427,7 @@ class TransactionCoderSpec
 
     transactionWithout(
       tx,
-      condApply(minMaintainersInExercise, withoutMaintainersInExercise)
-        .compose(condApply(minContractKeyInExercise, withoutContractKeyInExercise))
-        .compose(condApply(minExerciseResult, withoutExerciseResult))
-        .compose(condApply(minChoiceObservers, withoutChoiceObservers))
+      condApply(TransactionVersions.minChoiceObservers, withoutChoiceObservers)
         .compose(withoutByKeyFlag[Nid, Cid, Val]),
     )
   }

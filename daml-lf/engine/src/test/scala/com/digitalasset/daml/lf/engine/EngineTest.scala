@@ -19,7 +19,6 @@ import com.daml.lf.transaction.{
   Node,
   NodeId,
   SubmittedTransaction,
-  TransactionVersion,
   VersionedTransaction,
   GenTransaction => GenTx,
   Transaction => Tx,
@@ -1063,7 +1062,6 @@ class EngineTest
             _,
             _,
             _,
-            _,
             children,
             _,
             _,
@@ -1215,8 +1213,7 @@ class EngineTest
 
     def actFetchActors[Nid, Cid, Val](n: Node.GenNode[Nid, Cid, Val]): Set[Party] = {
       n match {
-        case Node.NodeFetch(_, _, _, actingParties, _, _, _, _) =>
-          actingParties.getOrElse(Set.empty)
+        case Node.NodeFetch(_, _, _, actingParties, _, _, _, _) => actingParties
         case _ => Set()
       }
     }
@@ -1327,7 +1324,7 @@ class EngineTest
         coid = fetchedCid,
         templateId = fetchedTid,
         optLocation = None,
-        actingParties = None,
+        actingParties = Set.empty,
         signatories = Set.empty,
         stakeholders = Set.empty,
         key = None,
@@ -1662,7 +1659,7 @@ class EngineTest
     "be partially reinterpretable" in {
       val Right((tx, txMeta)) = run(3)
       val ImmArray(_, exeNode1) = tx.transaction.roots
-      val Node.NodeExercises(_, _, _, _, _, _, _, _, _, _, _, children, _, _, _) =
+      val Node.NodeExercises(_, _, _, _, _, _, _, _, _, _, children, _, _, _) =
         tx.transaction.nodes(exeNode1)
       val nids = children.toSeq.take(2).toImmArray
 
@@ -1818,18 +1815,6 @@ class EngineTest
       result shouldBe 'left
       result.left.get.msg should include("Update failed due to disallowed value version")
     }
-
-    "fail nicely if it can serialize the transaction" in {
-      run(cidV6) shouldBe 'right
-      val result = run(
-        cidV6,
-        EngineConfig.Stable.copy(
-          allowedOutputTransactionVersions =
-            VersionRange(TransactionVersion("9"), TransactionVersion("9"))))
-      result shouldBe 'left
-      result.left.get.msg should include("inferred transaction version 10 is not allowed")
-    }
-
   }
 
   "Engine.preloadPackage" should {
@@ -1957,8 +1942,7 @@ object EngineTest {
                       _,
                       _,
                       _,
-                      true,
-                      _,
+                      consuming @ true,
                       _,
                       _,
                       _,
@@ -2004,7 +1988,20 @@ object EngineTest {
     iterate.map {
       case (nodes, roots, dependsOnTime, nodeSeeds, _, _) =>
         (
-          TxVersions.assertAsVersionedTransaction(GenTx(nodes, roots.toImmArray)),
+          TxVersions
+            .asVersionedTransaction(
+              TxVersions.DevOutputVersions,
+              engine.compiledPackages().packageLanguageVersion,
+              roots.toImmArray,
+              nodes.transform(
+                (_, v) =>
+                  Node.GenNode.map3(
+                    identity[NodeId],
+                    identity[ContractId],
+                    (v: VersionedValue[ContractId]) => v.value)(v))
+            )
+            .right
+            .get,
           Tx.Metadata(
             submissionSeed = None,
             submissionTime = txMeta.submissionTime,
