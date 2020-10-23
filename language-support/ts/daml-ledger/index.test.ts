@@ -75,6 +75,7 @@ const Foo: Template<Foo, string, "foo-id"> = {
   templateId: "foo-id",
   keyDecoder: jtv.string(),
   decoder: jtv.object({key: jtv.string()}),
+  encoder: (o) => o,
   Archive: {} as unknown as Choice<Foo, {}, {}, string>,
 };
 
