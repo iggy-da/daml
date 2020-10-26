@@ -141,6 +141,7 @@ withJsonApi (SandboxPort sandboxPort) (JsonApiPort jsonApiPort) extraArgs a = do
                 { JWT.unregisteredClaims = JWT.ClaimsMap $
                       Map.fromList [("https://daml.com/ledger-api", Object $ HashMap.fromList [("actAs", toJSON ["Alice" :: T.Text]), ("ledgerId", "MyLedger"), ("applicationId", "foobar")])]
                 }
+        putStrLn $ T.unpack token
         -- For now, we have a dummy authorization header here to wait for startup since we cannot get a 200
         -- response otherwise. We probably want to add some method to detect successful startup without
         -- any authorization
