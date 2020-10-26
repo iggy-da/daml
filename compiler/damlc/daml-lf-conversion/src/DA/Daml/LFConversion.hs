@@ -692,10 +692,10 @@ convertChoice env tbinds (ChoiceData ty expr)
         Consuming -> update
         NonConsuming -> update
         PreConsuming ->
-          EUpdate $ UBind (Binding (mkVar "_", TUnit) archiveSelf) update
+          EUpdate $ UBind (Binding (mkVar "_", Just TUnit) archiveSelf) update
         PostConsuming ->
-          EUpdate $ UBind (Binding (res, choiceRetTy) update) $
-          EUpdate $ UBind (Binding (mkVar "_", TUnit) archiveSelf) $
+          EUpdate $ UBind (Binding (res, Just choiceRetTy) update) $
+          EUpdate $ UBind (Binding (mkVar "_", Just TUnit) archiveSelf) $
           EUpdate $ UPure choiceRetTy $ EVar res
     pure TemplateChoice
         { chcLocation = Nothing
@@ -1000,7 +1000,7 @@ convertExpr env0 e = do
           mkBind inj bind = fmap (, args) $ do
               x' <- convertExpr env x
               y' <- convertExpr env y
-              b' <- convVarWithType env b
+              b' <- convVarWithMbType env b
               pure (inj (bind (Binding b' x') y'))
     go env semi@(VarIn DA_Internal_Prelude ">>") (LType monad : LType t1 : LType t2 : LExpr dict : LExpr x : LExpr y : args) = fmap (, args) $ do
         monad' <- convertType env monad
@@ -1010,8 +1010,8 @@ convertExpr env0 e = do
         x' <- convertExpr env x
         y' <- convertExpr env y
         case monad' of
-          TBuiltin BTUpdate -> pure $ EUpdate (UBind (Binding (mkVar "_", t1') x') y')
-          TBuiltin BTScenario -> pure $ EScenario (SBind (Binding (mkVar "_", t1') x') y')
+          TBuiltin BTUpdate -> pure $ EUpdate (UBind (Binding (mkVar "_", Just t1') x') y')
+          TBuiltin BTScenario -> pure $ EScenario (SBind (Binding (mkVar "_", Just t1') x') y')
           _ -> do
             EVal semi' <- convertExpr env semi
             let bind' = EVal semi'{qualObject = mkVal ">>="}
@@ -1122,7 +1122,7 @@ convertExpr env0 e = do
         -- GHC only generates empty case alternatives if it is sure the scrutinee will fail, LF doesn't support empty alternatives
         scrutinee' <- convertExpr env scrutinee
         typ' <- convertType env typ
-        bind' <- convVarWithType env bind
+        bind' <- convVarWithMbType env bind
         pure $
           ELet (Binding bind' scrutinee') $
           ECase (EVar $ convVar bind) [CaseAlternative CPDefault $ EBuiltin BEError `ETyApp` typ' `ETmApp` EBuiltin (BEText "Unreachable")]
@@ -1130,7 +1130,7 @@ convertExpr env0 e = do
         scrutinee' <- convertExpr env scrutinee
         bindTy <- convertType env $ varType bind
         alts' <- mapM (convertAlt env bindTy) alts
-        bind' <- convVarWithType env bind
+        bind' <- convVarWithMbType env bind
         if isDeadOcc (occInfo (idInfo bind))
           then pure $ ECase scrutinee' alts'
           else pure $
@@ -1307,7 +1307,7 @@ convertLet env binder bound mkBody = do
     case bound of
         EVar{} -> mkBody (envInsertAlias binder bound env)
         _ -> do
-            binder <- convVarWithType env binder
+            binder <- convVarWithMbType env binder
             body <- mkBody env
             pure $ ELet (Binding binder bound) body
 
@@ -1371,7 +1371,7 @@ convertAlt _ _ x = unsupported "Case alternative of this form" x
 mkProjBindings :: Env -> LF.Expr -> TypeConApp -> [(Var, FieldName)] -> LF.Expr -> ConvertM LF.Expr
 mkProjBindings env recExpr recTyp vsFlds e =
   fmap (\bindings -> mkELets bindings e) $ sequence
-    [ Binding <$> convVarWithType env v <*> pure (ERecProj recTyp fld recExpr)
+    [ Binding <$> convVarWithMbType env v <*> pure (ERecProj recTyp fld recExpr)
     | (v, fld) <- vsFlds
     , not (isDeadOcc (occInfo (idInfo v)))
     ]
@@ -1833,6 +1833,10 @@ convVar = mkVar . varPrettyPrint
 
 convVarWithType :: Env -> Var -> ConvertM (ExprVarName, LF.Type)
 convVarWithType env v = (convVar v,) <$> convertType env (varType v)
+
+convVarWithMbType :: Env -> Var -> ConvertM (ExprVarName, Maybe LF.Type)
+convVarWithMbType env v = (convVar v,) . Just <$> convertType env (varType v)
+
 convVal :: Var -> ExprValName
 convVal = mkVal . varPrettyPrint
 
