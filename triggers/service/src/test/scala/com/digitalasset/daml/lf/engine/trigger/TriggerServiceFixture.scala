@@ -124,6 +124,7 @@ object TriggerServiceFixture extends StrictLogging {
       encodedDar: Option[Dar[(PackageId, DamlLf.ArchivePayload)]],
       jdbcConfig: Option[JdbcConfig],
       authTestConfig: Option[AuthTestConfig],
+      xtoxiproxyClient: ToxiproxyClient,
   )(testFn: (Uri, LedgerClient, Proxy) => Future[A])(
       implicit mat: Materializer,
       aesf: ExecutionSequencerFactory,
@@ -132,6 +133,7 @@ object TriggerServiceFixture extends StrictLogging {
       pos: source.Position,
   ): Future[A] = {
     logger.info(s"${pos.fileName}:${pos.lineNumber}: setting up trigger service")
+    logger.debug(s"toxiproxy ${xtoxiproxyClient.version()}")
 
     val host = InetAddress.getLoopbackAddress
     val isWindows: Boolean = sys.props("os.name").toLowerCase.contains("windows")

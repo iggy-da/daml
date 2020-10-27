@@ -28,6 +28,7 @@ import spray.json._
 import com.daml.bazeltools.BazelRunfiles.requiredResource
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.grpc.adapter.{AkkaExecutionSequencerPool, ExecutionSequencerFactory}
+import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.api.v1.commands._
 import com.daml.ledger.api.v1.command_service._
 import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
@@ -99,6 +100,8 @@ trait HttpCookies extends BeforeAndAfterEach { this: Suite =>
 abstract class AbstractTriggerServiceTest
     extends AsyncFlatSpec
     with HttpCookies
+    with ToxiproxyFixture
+    with SuiteResourceManagementAroundAll
     with Eventually
     with Matchers
     with StrictLogging {
@@ -135,7 +138,7 @@ abstract class AbstractTriggerServiceTest
   }
 
   def testId: String = this.getClass.getSimpleName
-  implicit val system: ActorSystem = ActorSystem(testId)
+  protected override def actorSystemName = testId
   implicit val esf: ExecutionSequencerFactory = new AkkaExecutionSequencerPool(testId)(system)
   implicit val ec: ExecutionContext = system.dispatcher
 
@@ -149,7 +152,8 @@ abstract class AbstractTriggerServiceTest
       List(darPath),
       encodedDar,
       jdbcConfig,
-      authTestConfig)(testFn)
+      authTestConfig,
+      proxyClient)(testFn)
 
   def startTrigger(uri: Uri, triggerName: String, party: Party): Future[HttpResponse] = {
     val req = HttpRequest(
