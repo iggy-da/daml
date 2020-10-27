@@ -29,6 +29,7 @@ import com.daml.ledger.client.configuration.{
   LedgerClientConfiguration,
   LedgerIdRequirement
 }
+import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.archive.Dar
 import com.daml.lf.data.Ref._
 import com.daml.oauth.middleware.{Config => MiddlewareConfig, Server => MiddlewareServer}
@@ -39,10 +40,17 @@ import com.daml.platform.sandbox.SandboxServer
 import com.daml.platform.sandbox.config.SandboxConfig
 import com.daml.platform.services.time.TimeProviderType
 import com.daml.ports.{LockedFreePort, Port}
+import com.daml.ledger.api.testing.utils.{
+  AkkaBeforeAndAfterAll,
+  OwnedResource,
+  SuiteResource,
+  Resource => TestResource
+}
 import com.daml.timer.RetryStrategy
 import com.typesafe.scalalogging.StrictLogging
 import eu.rekawek.toxiproxy._
 import org.scalactic.source
+import org.scalatest.{BeforeAndAfterEach, Suite}
 import scalaz.syntax.std.option._
 
 import scala.concurrent._
@@ -55,6 +63,55 @@ private[trigger] final case class AuthTestConfig(
     // Grant readAs claims for these parties to the ledger client provided to test cases.
     parties: List[ApiTypes.Party],
 )
+
+trait ToxiproxyFixture
+    extends SuiteResource[ToxiproxyClient]
+    with AkkaBeforeAndAfterAll
+    with BeforeAndAfterEach {
+  self: Suite =>
+  private def toxiproxy: ResourceOwner[ToxiproxyClient] =
+    new ResourceOwner[ToxiproxyClient] {
+      val host = InetAddress.getLoopbackAddress
+      val isWindows: Boolean = sys.props("os.name").toLowerCase.contains("windows")
+      override def acquire()(implicit context: ResourceContext): Resource[ToxiproxyClient] = {
+        def start(): Future[(ToxiproxyClient, Process)] = {
+          val toxiproxyExe =
+            if (!isWindows) BazelRunfiles.rlocation("external/toxiproxy_dev_env/bin/toxiproxy-cmd")
+            else
+              BazelRunfiles.rlocation(
+                "external/toxiproxy_dev_env/toxiproxy-server-windows-amd64.exe")
+          for {
+            toxiproxyPort <- Future(LockedFreePort.find())
+            toxiproxyServer <- Future(
+              Process(Seq(toxiproxyExe, "--port", toxiproxyPort.port.value.toString)).run())
+            _ <- RetryStrategy.constant(attempts = 3, waitTime = 2.seconds)((_, _) =>
+              Future(toxiproxyPort.testAndUnlock(host)))
+            toxiproxyClient = new ToxiproxyClient(host.getHostName, toxiproxyPort.port.value)
+          } yield (toxiproxyClient, toxiproxyServer)
+        }
+        def stop(r: (ToxiproxyClient, Process)) = Future {
+          r._2.destroy
+          val _ = r._2.exitValue
+          ()
+        }
+        Resource(start())(stop).map {
+          case (toxiproxyClient, _) => toxiproxyClient
+        }
+      }
+    }
+  protected def proxyClient: ToxiproxyClient = suiteResource.value
+
+  override protected lazy val suiteResource: TestResource[ToxiproxyClient] = {
+    implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
+    new OwnedResource[ResourceContext, ToxiproxyClient](
+      toxiproxy,
+      acquisitionTimeout = 1.minute,
+      releaseTimeout = 1.minute,
+    )
+  }
+
+  override protected def beforeEach() = proxyClient.reset()
+}
 
 object TriggerServiceFixture extends StrictLogging {
 
